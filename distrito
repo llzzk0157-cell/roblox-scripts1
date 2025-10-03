@@ -1,0 +1,1166 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
+local LP = Players.LocalPlayer
+
+local function alive(i)
+    if not i then return false end
+    local ok = pcall(function() return i.Parent end)
+    if not ok then return false end
+    return i.Parent ~= nil
+end
+
+local function validPart(p)
+    return p and alive(p) and p:IsA("BasePart")
+end
+
+local Window = Rayfield:CreateWindow({
+    Name = "Distrito da ViolÃªncia",
+    LoadingTitle = "Distrito da ViolÃªncia",
+    LoadingSubtitle = "by ito",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "VD_Suite",
+        FileName = "vd_config"
+    },
+    KeySystem = false
+})
+
+local TabPlayer = Window:CreateTab("Player")
+local TabESP = Window:CreateTab("ESP")
+local TabWorld = Window:CreateTab("World")
+local TabMisc = Window:CreateTab("Misc")
+local TabVisual = Window:CreateTab("Visual")
+
+local function firstBasePart(inst)
+    if not alive(inst) then return nil end
+    if inst:IsA("BasePart") then return inst end
+    if inst:IsA("Model") then
+        if inst.PrimaryPart and inst.PrimaryPart:IsA("BasePart") and alive(inst.PrimaryPart) then return inst.PrimaryPart end
+        local p = inst:FindFirstChildWhichIsA("BasePart", true)
+        if validPart(p) then return p end
+    end
+    return nil
+end
+
+local function makeBillboard(text, color3)
+    local g = Instance.new("BillboardGui")
+    g.Name = "VD_Tag"
+    g.AlwaysOnTop = true
+    g.Size = UDim2.new(0, 180, 0, 34)
+    g.StudsOffset = Vector3.new(0, 3, 0)
+    local l = Instance.new("TextLabel")
+    l.Name = "Label"
+    l.BackgroundTransparency = 1
+    l.Size = UDim2.new(1, 0, 1, 0)
+    l.Font = Enum.Font.GothamBold
+    l.Text = text
+    l.TextSize = 14
+    l.TextColor3 = color3 or Color3.new(1,1,1)
+    l.TextStrokeTransparency = 0
+    l.TextStrokeColor3 = Color3.new(0,0,0)
+    l.Parent = g
+    return g
+end
+
+local function ensureBoxESP(part, name, color)
+    if not validPart(part) then return end
+    local esp = part:FindFirstChild(name)
+    if not esp then
+        local ok, obj = pcall(function()
+            local a = Instance.new("BoxHandleAdornment")
+            a.Name = name
+            a.Adornee = part
+            a.ZIndex = 10
+            a.AlwaysOnTop = true
+            a.Transparency = 0.5
+            a.Size = part.Size + Vector3.new(0.2,0.2,0.2)
+            a.Color3 = color
+            a.Parent = part
+            return a
+        end)
+        if not ok then return end
+        esp = obj
+    else
+        esp.Color3 = color
+        esp.Size = part.Size + Vector3.new(0.2,0.2,0.2)
+    end
+end
+
+local function clearChild(o, n)
+    if o and alive(o) then
+        local c = o:FindFirstChild(n)
+        if c then pcall(function() c:Destroy() end) end
+    end
+end
+
+local function ensureHighlight(model, fill)
+    if not model or not model:IsA("Model") or not alive(model) then return end
+    local hl = model:FindFirstChild("VD_HL")
+    if not hl then
+        local ok, obj = pcall(function()
+            local h = Instance.new("Highlight")
+            h.Name = "VD_HL"
+            h.Adornee = model
+            h.FillTransparency = 0.5
+            h.OutlineTransparency = 0
+            h.Parent = model
+            return h
+        end)
+        if not ok then return end
+        hl = obj
+    end
+    hl.FillColor = fill
+    hl.OutlineColor = fill
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+end
+
+local function clearHighlight(model)
+    if model and model:FindFirstChild("VD_HL") then pcall(function() model.VD_HL:Destroy() end) end
+end
+
+local survivorColor = Color3.fromRGB(0,255,0)
+local killerColor = Color3.fromRGB(255,0,0)
+local nametagsEnabled = false
+local playerESPEnabled = false
+local playerConns = {}
+
+local function getRole(p)
+    if p.Team and p.Team.Name then
+        local n = p.Team.Name:lower()
+        if n:find("killer") then return "Killer" end
+        if n:find("survivor") then return "Survivor" end
+    end
+    return "Survivor"
+end
+
+local function applyPlayerESP(p)
+    if p == LP then return end
+    local c = p.Character
+    if not c or not alive(c) then return end
+    local role = getRole(p)
+    local col = role == "Killer" and killerColor or survivorColor
+    if playerESPEnabled then
+        if c:IsDescendantOf(Workspace) then ensureHighlight(c, col) end
+        local head = c:FindFirstChild("Head")
+        if nametagsEnabled and validPart(head) then
+            if not head:FindFirstChild("VD_Tag") then
+                local b = makeBillboard(p.Name, col)
+                if alive(head) then b.Parent = head end
+            else
+                local l = head.VD_Tag:FindFirstChild("Label")
+                if l then l.Text = p.Name l.TextColor3 = col end
+            end
+        elseif head and head:FindFirstChild("VD_Tag") then
+            pcall(function() head.VD_Tag:Destroy() end)
+        end
+    else
+        clearHighlight(c)
+        local head = c:FindFirstChild("Head")
+        if head and head:FindFirstChild("VD_Tag") then pcall(function() head.VD_Tag:Destroy() end) end
+    end
+end
+
+local function watchPlayer(p)
+    if playerConns[p] then for _,cn in ipairs(playerConns[p]) do cn:Disconnect() end end
+    playerConns[p] = {}
+    table.insert(playerConns[p], p.CharacterAdded:Connect(function()
+        task.delay(0.15, function() applyPlayerESP(p) end)
+    end))
+    table.insert(playerConns[p], p:GetPropertyChangedSignal("Team"):Connect(function() applyPlayerESP(p) end))
+    if p.Character then applyPlayerESP(p) end
+end
+
+local function unwatchPlayer(p)
+    if p.Character then
+        clearHighlight(p.Character)
+        local head = p.Character:FindFirstChild("Head")
+        if head and head:FindFirstChild("VD_Tag") then pcall(function() head.VD_Tag:Destroy() end) end
+    end
+    if playerConns[p] then for _,cn in ipairs(playerConns[p]) do cn:Disconnect() end end
+    playerConns[p] = nil
+end
+
+TabESP:CreateSection("Players")
+
+TabESP:CreateToggle({
+    Name = "Player ESP (Chams)",
+    CurrentValue = false,
+    Flag = "PlayerESP",
+    Callback = function(s)
+        playerESPEnabled = s
+        for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+    end
+})
+
+TabESP:CreateToggle({
+    Name = "Nametags",
+    CurrentValue = false,
+    Flag = "Nametags",
+    Callback = function(s)
+        nametagsEnabled = s
+        for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+    end
+})
+
+TabESP:CreateColorPicker({
+    Name = "Survivor Color",
+    Color = survivorColor,
+    Flag = "SurvivorCol",
+    Callback = function(c)
+        survivorColor = c
+        for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+    end
+})
+
+TabESP:CreateColorPicker({
+    Name = "Killer Color",
+    Color = killerColor,
+    Flag = "KillerCol",
+    Callback = function(c)
+        killerColor = c
+        for _,pl in ipairs(Players:GetPlayers()) do if pl ~= LP then applyPlayerESP(pl) end end
+    end
+})
+
+for _,p in ipairs(Players:GetPlayers()) do if p ~= LP then watchPlayer(p) end end
+Players.PlayerAdded:Connect(watchPlayer)
+Players.PlayerRemoving:Connect(unwatchPlayer)
+
+local worldColors = {
+    Generator = Color3.fromRGB(0,170,255),
+    Hook = Color3.fromRGB(255,0,0),
+    Gate = Color3.fromRGB(255,225,0),
+    Window = Color3.fromRGB(255,255,255),
+    Palletwrong = Color3.fromRGB(255,140,0)
+}
+local worldEnabled = {Generator=false,Hook=false,Gate=false,Window=false,Palletwrong=false}
+local validCats = {Generator=true,Hook=true,Gate=true,Window=true,Palletwrong=true}
+local worldReg = {Generator={},Hook={},Gate={},Window={},Palletwrong={}}
+local mapAdd, mapRem = {}, {}
+local worldLoopThread = nil
+
+local function pickRep(model, cat)
+    if not model or not alive(model) then return nil end
+    if cat == "Generator" then
+        local hb = model:FindFirstChild("HitBox", true)
+        if validPart(hb) then return hb end
+    elseif cat == "Palletwrong" then
+        local a = model:FindFirstChild("HumanoidRootPart", true)
+        if validPart(a) then return a end
+        local b = model:FindFirstChild("PrimaryPartPallet", true)
+        if validPart(b) then return b end
+        local c = model:FindFirstChild("Primary1", true)
+        if validPart(c) then return c end
+        local d = model:FindFirstChild("Primary2", true)
+        if validPart(d) then return d end
+    end
+    return firstBasePart(model)
+end
+
+local function ensureWorldEntry(cat, model)
+    if not alive(model) then return end
+    if worldReg[cat][model] then return end
+    local rep = pickRep(model, cat)
+    if not validPart(rep) then return end
+    worldReg[cat][model] = {part = rep}
+end
+
+local function removeWorldEntry(cat, model)
+    local entry = worldReg[cat][model]
+    if not entry then return end
+    local part = entry.part
+    clearChild(part, "VD_"..cat)
+    clearChild(part, "VD_Text_"..cat)
+    worldReg[cat][model] = nil
+end
+
+local function registerFromDescendant(obj)
+    if not alive(obj) then return end
+    if obj:IsA("Model") and validCats[obj.Name] then
+        ensureWorldEntry(obj.Name, obj)
+        return
+    end
+    if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") and validCats[obj.Parent.Name] then
+        ensureWorldEntry(obj.Parent.Name, obj.Parent)
+    end
+end
+
+local function unregisterFromDescendant(obj)
+    if not obj then return end
+    if obj:IsA("Model") and validCats[obj.Name] then
+        removeWorldEntry(obj.Name, obj)
+        return
+    end
+    if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") and validCats[obj.Parent.Name] then
+        if worldReg[obj.Parent.Name][obj.Parent] and worldReg[obj.Parent.Name][obj.Parent].part == obj then
+            removeWorldEntry(obj.Parent.Name, obj.Parent)
+        end
+    end
+end
+
+local function attachRoot(root)
+    if not root or mapAdd[root] then return end
+    mapAdd[root] = root.DescendantAdded:Connect(registerFromDescendant)
+    mapRem[root] = root.DescendantRemoving:Connect(unregisterFromDescendant)
+    for _,d in ipairs(root:GetDescendants()) do registerFromDescendant(d) end
+end
+
+local function refreshRoots()
+    for _,cn in pairs(mapAdd) do if cn then cn:Disconnect() end end
+    for _,cn in pairs(mapRem) do if cn then cn:Disconnect() end end
+    mapAdd, mapRem = {}, {}
+    local r1 = Workspace:FindFirstChild("Map")
+    local r2 = Workspace:FindFirstChild("Map1")
+    if r1 then attachRoot(r1) end
+    if r2 then attachRoot(r2) end
+end
+
+local function clearCategory(cat)
+    for _,entry in pairs(worldReg[cat]) do
+        if entry and entry.part then
+            clearChild(entry.part, "VD_"..cat)
+            clearChild(entry.part, "VD_Text_"..cat)
+        end
+    end
+end
+
+local function anyWorldEnabled()
+    for _,v in pairs(worldEnabled) do if v then return true end end
+    return false
+end
+
+local function startWorldLoop()
+    if worldLoopThread then return end
+    worldLoopThread = task.spawn(function()
+        while anyWorldEnabled() do
+            for cat,models in pairs(worldReg) do
+                if worldEnabled[cat] then
+                    local col = worldColors[cat]
+                    local tagName = "VD_"..cat
+                    local textName = "VD_Text_"..cat
+                    local labelText = cat == "Palletwrong" and "Pallet" or cat
+                    local n = 0
+                    for model,entry in pairs(models) do
+                        local part = entry.part
+                        if model and alive(model) then
+                            if not validPart(part) or not part:IsDescendantOf(model) then
+                                entry.part = pickRep(model, cat)
+                                part = entry.part
+                            end
+                            if validPart(part) then
+                                ensureBoxESP(part, tagName, col)
+                                local bb = part:FindFirstChild(textName)
+                                if not bb then
+                                    local newbb = makeBillboard(labelText, col)
+                                    newbb.Name = textName
+                                    if alive(part) then newbb.Parent = part end
+                                else
+                                    local lbl = bb:FindFirstChild("Label")
+                                    if lbl then lbl.Text = labelText lbl.TextColor3 = col end
+                                end
+                            end
+                        else
+                            removeWorldEntry(cat, model)
+                        end
+                        n = n + 1
+                        if n % 50 == 0 then task.wait() end
+                    end
+                end
+            end
+            task.wait(0.25)
+        end
+        worldLoopThread = nil
+    end)
+end
+
+local function setWorldToggle(cat, state)
+    worldEnabled[cat] = state
+    if state then
+        if not worldLoopThread then startWorldLoop() end
+    else
+        clearCategory(cat)
+    end
+end
+
+refreshRoots()
+Workspace.ChildAdded:Connect(function(ch)
+    if ch.Name == "Map" or ch.Name == "Map1" then attachRoot(ch) end
+end)
+
+TabWorld:CreateSection("Toggles")
+
+TabWorld:CreateToggle({Name="Generators", CurrentValue=false, Flag="Gen", Callback=function(s) setWorldToggle("Generator", s) end})
+TabWorld:CreateToggle({Name="Hooks", CurrentValue=false, Flag="Hook", Callback=function(s) setWorldToggle("Hook", s) end})
+TabWorld:CreateToggle({Name="Gates", CurrentValue=false, Flag="Gate", Callback=function(s) setWorldToggle("Gate", s) end})
+TabWorld:CreateToggle({Name="Windows", CurrentValue=false, Flag="Window", Callback=function(s) setWorldToggle("Window", s) end})
+TabWorld:CreateToggle({Name="Pallets", CurrentValue=false, Flag="Pallet", Callback=function(s) setWorldToggle("Palletwrong", s) end})
+
+TabWorld:CreateSection("Colors")
+
+TabWorld:CreateColorPicker({Name="Generators", Color=worldColors.Generator, Flag="GenCol", Callback=function(c) worldColors.Generator = c end})
+TabWorld:CreateColorPicker({Name="Hooks", Color=worldColors.Hook, Flag="HookCol", Callback=function(c) worldColors.Hook = c end})
+TabWorld:CreateColorPicker({Name="Gates", Color=worldColors.Gate, Flag="GateCol", Callback=function(c) worldColors.Gate = c end})
+TabWorld:CreateColorPicker({Name="Windows", Color=worldColors.Window, Flag="WinCol", Callback=function(c) worldColors.Window = c end})
+TabWorld:CreateColorPicker({Name="Pallets", Color=worldColors.Palletwrong, Flag="PalCol", Callback=function(c) worldColors.Palletwrong = c end})
+
+local function hasAncestorNamed(instance, target)
+    local p = instance and instance.Parent
+    while p do
+        if p.Name == target then return true end
+        p = p.Parent
+    end
+    return false
+end
+
+local guiWhitelist = {
+    ["Rayfield"] = true,
+    ["DevConsoleMaster"] = true,
+    ["RobloxGui"] = true,
+    ["PlayerList"] = true,
+    ["Chat"] = true,
+    ["BubbleChat"] = true,
+    ["Backpack"] = true
+}
+
+local skillExactNames = {
+    SkillCheckPromptGui = true,
+    ["SkillCheckPromptGui-con"] = true,
+    SkillCheckEvent = true,
+    SkillCheckFailEvent = true,
+    SkillCheckResultEvent = true
+}
+
+local function isExactSkill(inst)
+    local n = inst and inst.Name
+    if not n then return false end
+    if skillExactNames[n] then return true end
+    if n:lower():find("skillcheck", 1, true) then return true end
+    return false
+end
+
+local function hardDelete(obj)
+    pcall(function()
+        if obj:IsA("ProximityPrompt") then
+            obj.Enabled = false
+            obj.HoldDuration = 1e9
+        end
+        if obj:IsA("ScreenGui") or obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
+            if obj:IsA("ScreenGui") and guiWhitelist[obj.Name] then return end
+            obj.Enabled = false
+            obj.Visible = false
+            obj.ResetOnSpawn = false
+            obj:Destroy()
+        else
+            obj:Destroy()
+        end
+    end)
+end
+
+local function nukeSkillExactOnce()
+    local pg = LP:FindFirstChild("PlayerGui")
+    if pg then
+        for _,g in ipairs(pg:GetChildren()) do if isExactSkill(g) then hardDelete(g) end end
+        for _,d in ipairs(pg:GetDescendants()) do if isExactSkill(d) then hardDelete(d) end end
+    end
+    for _,g in ipairs(StarterGui:GetChildren()) do if isExactSkill(g) then hardDelete(g) end end
+    local rem = ReplicatedStorage:FindFirstChild("Remotes")
+    if rem then
+        for _,d in ipairs(rem:GetDescendants()) do if isExactSkill(d) then hardDelete(d) end end
+    end
+end
+
+local noSkillEnabled = false
+local hookSkillInstalled = false
+local rsAddConn, pgAddConn, pgDescConn, sgAddConn, remAddConn, wsAddConn
+local charAddConns = {}
+
+local function installSkillBlock()
+    if hookSkillInstalled then return end
+    if typeof(hookmetamethod)=="function" and typeof(getnamecallmethod)=="function" then
+        local old
+        old = hookmetamethod(game, "__namecall", function(self, ...)
+            local m = getnamecallmethod()
+            if noSkillEnabled and typeof(self)=="Instance" and isExactSkill(self) and (m=="FireServer" or m=="InvokeServer") then
+                return nil
+            end
+            return old(self, ...)
+        end)
+        hookSkillInstalled = true
+    end
+end
+
+local function startNoSkill()
+    installSkillBlock()
+    nukeSkillExactOnce()
+    local pg = LP:FindFirstChild("PlayerGui")
+    if pg then
+        if pgAddConn then pgAddConn:Disconnect() end
+        pgAddConn = pg.ChildAdded:Connect(function(ch)
+            if noSkillEnabled and isExactSkill(ch) then hardDelete(ch) end
+        end)
+        if pgDescConn then pgDescConn:Disconnect() end
+        pgDescConn = pg.DescendantAdded:Connect(function(d)
+            if noSkillEnabled and isExactSkill(d) then hardDelete(d) end
+        end)
+    end
+    if sgAddConn then sgAddConn:Disconnect() end
+    sgAddConn = StarterGui.ChildAdded:Connect(function(ch)
+        if noSkillEnabled and isExactSkill(ch) then hardDelete(ch) end
+    end)
+    local rem = ReplicatedStorage:FindFirstChild("Remotes")
+    if rem then
+        if remAddConn then remAddConn:Disconnect() end
+        remAddConn = rem.DescendantAdded:Connect(function(d)
+            if noSkillEnabled and isExactSkill(d) then hardDelete(d) end
+        end)
+    end
+    if rsAddConn then rsAddConn:Disconnect() end
+    rsAddConn = ReplicatedStorage.DescendantAdded:Connect(function(d)
+        if not noSkillEnabled then return end
+        if d:IsA("ScreenGui") or d:IsA("BillboardGui") or d:IsA("SurfaceGui") or d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d:IsA("BindableEvent") then
+            if isExactSkill(d) then hardDelete(d) end
+        end
+    end)
+    for _,pl in ipairs(Players:GetPlayers()) do
+        if charAddConns[pl] then charAddConns[pl]:Disconnect() end
+        charAddConns[pl] = pl.CharacterAdded:Connect(function(ch)
+            if not noSkillEnabled then return end
+            task.wait(0.1)
+            for _,d in ipairs(ch:GetDescendants()) do if isExactSkill(d) then hardDelete(d) end end
+        end)
+        if pl.Character then
+            for _,d in ipairs(pl.Character:GetDescendants()) do if isExactSkill(d) then hardDelete(d) end end
+        end
+    end
+    if wsAddConn then wsAddConn:Disconnect() end
+    wsAddConn = Workspace.DescendantAdded:Connect(function(d)
+        if noSkillEnabled and isExactSkill(d) then hardDelete(d) end
+    end)
+end
+
+local function stopNoSkill()
+    if pgAddConn then pgAddConn:Disconnect() pgAddConn=nil end
+    if pgDescConn then pgDescConn:Disconnect() pgDescConn=nil end
+    if sgAddConn then sgAddConn:Disconnect() sgAddConn=nil end
+    if remAddConn then remAddConn:Disconnect() remAddConn=nil end
+    if rsAddConn then rsAddConn:Disconnect() rsAddConn=nil end
+    if wsAddConn then wsAddConn:Disconnect() wsAddConn=nil end
+    for pl,cn in pairs(charAddConns) do if cn then cn:Disconnect() end charAddConns[pl]=nil end
+end
+
+TabMisc:CreateSection("Skillcheck")
+
+TabMisc:CreateToggle({
+    Name = "No Skillchecks",
+    CurrentValue = false,
+    Flag = "NoSkill",
+    Callback = function(s)
+        noSkillEnabled = s
+        if s then startNoSkill() else stopNoSkill() end
+    end
+})
+
+local initLighting = {
+    Brightness = Lighting.Brightness,
+    ClockTime = Lighting.ClockTime,
+    FogStart = Lighting.FogStart,
+    FogEnd = Lighting.FogEnd,
+    GlobalShadows = Lighting.GlobalShadows,
+    OutdoorAmbient = Lighting.OutdoorAmbient,
+    ExposureCompensation = Lighting.ExposureCompensation,
+    ShadowSoftness = Lighting:FindFirstChild("ShadowSoftness") and Lighting.ShadowSoftness or nil,
+    EnvironmentDiffuseScale = Lighting:FindFirstChild("EnvironmentDiffuseScale") and Lighting.EnvironmentDiffuseScale or nil,
+    EnvironmentSpecularScale = Lighting:FindFirstChild("EnvironmentSpecularScale") and Lighting.EnvironmentSpecularScale or nil,
+    Technology = Lighting.Technology
+}
+
+local fullbrightEnabled = false
+local fbLoop
+local desiredClockTime = Lighting.ClockTime
+local timeLockActive = false
+
+local function bindTimeLock()
+    if timeLockActive then return end
+    timeLockActive = true
+    RunService:BindToRenderStep("VD_TimeLock", 299, function()
+        if Lighting.ClockTime ~= desiredClockTime then Lighting.ClockTime = desiredClockTime end
+    end)
+end
+
+local function unbindTimeLock()
+    if timeLockActive then
+        timeLockActive = false
+        pcall(function() RunService:UnbindFromRenderStep("VD_TimeLock") end)
+    end
+end
+
+TabVisual:CreateSection("Lighting")
+
+TabVisual:CreateToggle({
+    Name = "Fullbright",
+    CurrentValue = false,
+    Flag = "Fullbright",
+    Callback = function(s)
+        fullbrightEnabled = s
+        if fbLoop then task.cancel(fbLoop) fbLoop=nil end
+        if s then
+            fbLoop = task.spawn(function()
+                while fullbrightEnabled do
+                    Lighting.Brightness = 2
+                    Lighting.ClockTime = 14
+                    Lighting.FogStart = 0
+                    Lighting.FogEnd = 1e9
+                    Lighting.GlobalShadows = false
+                    Lighting.OutdoorAmbient = Color3.fromRGB(128,128,128)
+                    Lighting.ExposureCompensation = 0
+                    task.wait(0.5)
+                end
+            end)
+        else
+            for k,v in pairs(initLighting) do pcall(function() if v ~= nil then Lighting[k]=v end end) end
+            desiredClockTime = Lighting.ClockTime
+        end
+    end
+})
+
+local Lighting = game:GetService("Lighting")
+
+local colorCorrection = Lighting:FindFirstChild("CustomColorCorrection")
+if not colorCorrection then
+    colorCorrection = Instance.new("ColorCorrectionEffect")
+    colorCorrection.Name = "CustomColorCorrection"
+    colorCorrection.Parent = Lighting
+end
+
+local currentSaturation = 0.2
+local currentContrast = 0.1
+
+colorCorrection.Saturation = currentSaturation
+colorCorrection.Contrast = currentContrast
+
+TabPlayer:CreateSlider({
+    Name = "SaturaÃ§Ã£o",
+    Range = {0, 1},
+    Increment = 0.01,
+    CurrentValue = currentSaturation,
+    Flag = "SaturationSlider",
+    Callback = function(value)
+        currentSaturation = value
+        colorCorrection.Saturation = currentSaturation
+    end
+})
+
+TabPlayer:CreateSlider({
+    Name = "Contraste",
+    Range = {0, 1},
+    Increment = 0.01,
+    CurrentValue = currentContrast,
+    Flag = "ContrastSlider",
+    Callback = function(value)
+        currentContrast = value
+        colorCorrection.Contrast = currentContrast
+    end
+})
+
+TabVisual:CreateSlider({
+    Name = "Time Of Day",
+    Range = {0,24},
+    Increment = 1,
+    CurrentValue = Lighting.ClockTime,
+    Flag = "TimeOfDay",
+    Callback = function(v)
+        desiredClockTime = v
+        Lighting.ClockTime = v
+        bindTimeLock()
+    end
+})
+
+local nfActive = false
+local nfStore = {lighting={},inst=setmetatable({}, {__mode="k"}),conns={},tick=nil}
+local nfNameTokens = {"smoke","mist","fog","haze","smog","steam","cloud","lake"}
+local nfStrictNames = {["Smoke"]=true,["LakeMist"]=true,["Chromatic Water Fog"]=true,["Cursed Energy Smoke"]=true,["Firm Smoke"]=true,["Foggy Wind"]=true}
+local nfQueue = {}
+local nfQueued = setmetatable({}, {__mode="k"})
+local nfProcessed = setmetatable({}, {__mode="k"})
+local nfBudgetSeconds = 0.003
+local nfDebounce = false
+local noFogToggleOn = false
+
+local function nfSave(inst, props)
+    if not inst then return end
+    nfStore.inst[inst] = nfStore.inst[inst] or {}
+    for _,p in ipairs(props) do
+        if nfStore.inst[inst][p] == nil then
+            local ok,v = pcall(function() return inst[p] end)
+            if ok then nfStore.inst[inst][p] = v end
+        end
+    end
+end
+
+local function nfRestoreAll()
+    for inst,props in pairs(nfStore.inst) do
+        if inst and alive(inst) then
+            for k,v in pairs(props) do pcall(function() inst[k]=v end) end
+        end
+    end
+    nfStore.inst = setmetatable({}, {__mode="k"})
+    if nfStore.lighting then
+        for k,v in pairs(nfStore.lighting) do pcall(function() Lighting[k]=v end) end
+    end
+    for _,c in ipairs(nfStore.conns) do pcall(function() c:Disconnect() end) end
+    nfStore.conns = {}
+    if nfStore.tick then nfStore.tick:Disconnect() nfStore.tick=nil end
+end
+
+local function nfMatchesName(n)
+    local s = string.lower(n or "")
+    if nfStrictNames[n] then return true end
+    for _,t in ipairs(nfNameTokens) do
+        if string.find(s, t, 1, true) then return true end
+    end
+    return false
+end
+
+local function nfIsCandidate(inst)
+    if not inst or not inst.Parent then return false end
+    if inst:IsA("Clouds") or inst:IsA("Atmosphere") then return true end
+    if inst:IsA("ParticleEmitter") and nfMatchesName(inst.Name) then return true end
+    if inst:IsA("SunRaysEffect") or inst:IsA("BloomEffect") or inst:IsA("DepthOfFieldEffect") then return true end
+    if inst:IsA("Folder") and nfMatchesName(inst.Name) then return true end
+    if inst:IsA("Part") and nfMatchesName(inst.Name) then return true end
+    return false
+end
+
+local function nfDisableParticle(pe) nfSave(pe, {"Enabled","Rate"}); pcall(function() pe.Enabled = false pe.Rate = 0 end) end
+local function nfDisableClouds(c) nfSave(c, {"Enabled","Cover","Density","Color"}); pcall(function() c.Enabled = false end) end
+local function nfFlattenAtmosphere(a) nfSave(a, {"Density","Haze","Glare","Offset","Color","Decay"}); pcall(function() a.Density = 0 a.Haze = 0 a.Glare = 0 end) end
+local function nfToneEffects(e)
+    if e:IsA("SunRaysEffect") then nfSave(e, {"Enabled","Intensity","Spread"}); pcall(function() e.Enabled = false end)
+    elseif e:IsA("BloomEffect") then nfSave(e, {"Enabled","Intensity","Threshold","Size"}); pcall(function() e.Enabled = false end)
+    elseif e:IsA("DepthOfFieldEffect") then nfSave(e, {"Enabled","NearIntensity","FarIntensity","InFocusRadius","FocusDistance"}); pcall(function() e.Enabled = false end) end
+end
+
+local function nfHandle(inst)
+    if nfProcessed[inst] then return end
+    nfProcessed[inst] = true
+    if inst:IsA("Clouds") then nfDisableClouds(inst) return end
+    if inst:IsA("Atmosphere") then nfFlattenAtmosphere(inst) return end
+    if inst:IsA("ParticleEmitter") then nfDisableParticle(inst) return end
+    if inst:IsA("SunRaysEffect") or inst:IsA("BloomEffect") or inst:IsA("DepthOfFieldEffect") then nfToneEffects(inst) return end
+    if inst:IsA("Folder") or inst:IsA("Part") then
+        for _,d in ipairs(inst:GetDescendants()) do
+            if d:IsA("ParticleEmitter") and nfMatchesName(d.Name) then nfDisableParticle(d) end
+        end
+    end
+end
+
+local function nfEnqueueOne(inst)
+    if not nfActive or not nfIsCandidate(inst) or nfQueued[inst] then return end
+    nfQueued[inst] = true
+    table.insert(nfQueue, inst)
+end
+
+local function nfEnqueueTree(root)
+    if not root then return end
+    for _,d in ipairs(root:GetDescendants()) do
+        nfEnqueueOne(d)
+    end
+end
+
+local function nfApplyLighting()
+    nfStore.lighting = { FogStart = Lighting.FogStart, FogEnd = Lighting.FogEnd, FogColor = Lighting.FogColor }
+    pcall(function() Lighting.FogStart = 1e9 Lighting.FogEnd = 1e9 end)
+end
+
+local function nfBindWatchers()
+    local a = Workspace.DescendantAdded:Connect(function(d) nfEnqueueOne(d) end)
+    local b = Lighting.DescendantAdded:Connect(function(d) nfEnqueueOne(d) end)
+    local c = ReplicatedStorage.DescendantAdded:Connect(function(d) nfEnqueueOne(d) end)
+    local d = Workspace.ChildAdded:Connect(function(ch)
+        if (ch.Name=="Map" or ch.Name=="Map1" or ch.Name=="Terrain") and not nfDebounce then
+            nfDebounce = true
+            task.delay(0.4, function()
+                nfEnqueueTree(ch)
+                nfDebounce = false
+            end)
+        end
+    end)
+    table.insert(nfStore.conns,a); table.insert(nfStore.conns,b); table.insert(nfStore.conns,c); table.insert(nfStore.conns,d)
+end
+
+local function nfPrimeKnown()
+    local paths = {
+        "Ugc.Workspace.Map",
+        "Ugc.Workspace.Terrain",
+        "Ugc.Workspace.Lobby.CarLobby.Part",
+        "Ugc.ReplicatedStorage.Killers",
+        "Ugc.ReplicatedStorage.MapLighting",
+        "Ugc.ReplicatedStorage.Skyboxes"
+    }
+    for _,path in ipairs(paths) do
+        local inst = game
+        for seg in string.gmatch(path, "([^%.]+)") do inst = inst and inst:FindFirstChild(seg) end
+        if inst then nfEnqueueTree(inst) end
+    end
+end
+
+local function nfStartQueue()
+    if nfStore.tick then nfStore.tick:Disconnect() nfStore.tick=nil end
+    nfStore.tick = RunService.Heartbeat:Connect(function()
+        if not nfActive then return end
+        local t0 = os.clock()
+        while #nfQueue > 0 and (os.clock() - t0) < nfBudgetSeconds do
+            local inst = table.remove(nfQueue, 1)
+            if inst and inst.Parent then nfHandle(inst) end
+        end
+    end)
+end
+
+local function nfEnable()
+    if nfActive then return end
+    nfActive = true
+    nfQueue, nfQueued, nfProcessed = {}, setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
+    nfApplyLighting()
+    for _,a in ipairs(Lighting:GetChildren()) do if a:IsA("Atmosphere") then nfEnqueueOne(a) end end
+    nfPrimeKnown()
+    nfBindWatchers()
+    nfStartQueue()
+end
+
+local function nfDisable()
+    if not nfActive then return end
+    nfActive = false
+    nfRestoreAll()
+    nfQueue, nfQueued, nfProcessed = {}, setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
+end
+
+TabVisual:CreateToggle({
+    Name = "No Fog",
+    CurrentValue = false,
+    Flag = "NoFog",
+    Callback = function(s)
+        noFogToggleOn = s
+        if s then nfEnable() else nfDisable() end
+    end
+})
+
+local nsActive = false
+local nsStore = {lighting={},parts=setmetatable({}, {__mode="k"}),conns={}}
+local nsQueue, nsQueued = {}, setmetatable({}, {__mode="k"})
+local nsProcessed = setmetatable({}, {__mode="k"})
+local nsSignal = Instance.new("BindableEvent")
+local nsBatchSize = 400
+local nsTickDelay = 0.02
+local nsSoftRescanInterval, nsLastSoft = 6, 0
+
+local function nsSaveLighting()
+    nsStore.lighting = {
+        GlobalShadows = Lighting.GlobalShadows,
+        ShadowSoftness = Lighting:FindFirstChild("ShadowSoftness") and Lighting.ShadowSoftness or nil,
+        EnvironmentDiffuseScale = Lighting:FindFirstChild("EnvironmentDiffuseScale") and Lighting.EnvironmentDiffuseScale or nil,
+        EnvironmentSpecularScale = Lighting:FindFirstChild("EnvironmentSpecularScale") and Lighting.EnvironmentSpecularScale or nil,
+        Technology = Lighting.Technology
+    }
+end
+local function nsApplyLighting()
+    pcall(function()
+        Lighting.GlobalShadows = false
+        if Lighting:FindFirstChild("ShadowSoftness") then Lighting.ShadowSoftness = 0 end
+        if Lighting:FindFirstChild("EnvironmentDiffuseScale") then Lighting.EnvironmentDiffuseScale = 0 end
+        if Lighting:FindFirstChild("EnvironmentSpecularScale") then Lighting.EnvironmentSpecularScale = 0 end
+        Lighting.Technology = Enum.Technology.Compatibility
+    end)
+end
+local function nsRestoreLighting() for k,v in pairs(nsStore.lighting or {}) do pcall(function() if v ~= nil then Lighting[k]=v end end) end end
+local function nsSavePart(p) if nsStore.parts[p]==nil then nsStore.parts[p]={CastShadow=p.CastShadow} end end
+local function nsHandlePart(p) if nsProcessed[p] then return end nsProcessed[p]=true nsSavePart(p) pcall(function() p.CastShadow=false end) end
+local function nsIsCandidate(o) return o and o:IsA("BasePart") end
+local function nsEnqueue(o) if nsActive and nsIsCandidate(o) and not nsQueued[o] then nsQueued[o]=true table.insert(nsQueue,o) nsSignal:Fire() end end
+local function nsProcessQueue()
+    while nsActive do
+        if #nsQueue == 0 then nsSignal.Event:Wait() end
+        local c=0
+        while nsActive and #nsQueue>0 and c<nsBatchSize do
+            local o=table.remove(nsQueue,1); if o and o.Parent then nsHandlePart(o) end
+            c=c+1
+        end
+        task.wait(nsTickDelay)
+    end
+end
+local function nsSoftRescan()
+    for _,root in ipairs({Workspace, Workspace:FindFirstChild("Map"), Workspace:FindFirstChild("Terrain")}) do
+        if root then for _,d in ipairs(root:GetDescendants()) do if nsIsCandidate(d) then nsEnqueue(d) end end end
+    end
+end
+local function nsBindWatchers()
+    local a = Workspace.DescendantAdded:Connect(function(d) if nsIsCandidate(d) then nsEnqueue(d) end end)
+    local b = Workspace.ChildAdded:Connect(function(ch) if ch.Name=="Map" or ch.Name=="Map1" then task.delay(0.2, nsSoftRescan) end end)
+    local c = RunService.Heartbeat:Connect(function()
+        local now=os.clock(); if now-nsLastSoft>=nsSoftRescanInterval then nsLastSoft=now nsSoftRescan() end
+    end)
+    table.insert(nsStore.conns,a); table.insert(nsStore.conns,b); table.insert(nsStore.conns,c)
+end
+local nsThread=nil
+local function nsEnable()
+    if nsActive then return end
+    nsActive=true
+    nsQueue, nsQueued, nsProcessed = {}, setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
+    nsSaveLighting(); nsApplyLighting(); nsSoftRescan(); nsBindWatchers()
+    if not nsThread then nsThread=task.spawn(nsProcessQueue) end
+end
+local function nsDisable()
+    if not nsActive then return end
+    nsActive=false
+    for p,st in pairs(nsStore.parts) do if p and p.Parent and st and st.CastShadow~=nil then pcall(function() p.CastShadow=st.CastShadow end) end end
+    nsStore.parts=setmetatable({}, {__mode="k"})
+    for _,c in ipairs(nsStore.conns) do pcall(function() c:Disconnect() end) end
+    nsStore.conns={}
+    nsRestoreLighting()
+    nsQueue, nsQueued, nsProcessed = {}, setmetatable({}, {__mode="k"}), setmetatable({}, {__mode="k"})
+    nsSignal:Fire(); nsThread=nil
+end
+
+TabVisual:CreateToggle({
+    Name = "No Shadows",
+    CurrentValue = false,
+    Flag = "NoShadows",
+    Callback = function(s) if s then nsEnable() else nsDisable() end end
+})
+
+local currentSpeed = 16
+local speedHumanoid = nil
+local speedConnChanged, speedConnAncestry = nil, nil
+local speedBound = false
+
+local function setWalkSpeed(h, v) if h and h.Parent then pcall(function() h.WalkSpeed = v end) end end
+local function bindSpeedLoop()
+    if speedBound then return end
+    speedBound = true
+    RunService:BindToRenderStep("VD_SpeedEnforcer", 300, function()
+        if not speedHumanoid or not speedHumanoid.Parent then return end
+        if speedHumanoid.WalkSpeed ~= currentSpeed then setWalkSpeed(speedHumanoid, currentSpeed) end
+    end)
+end
+local function unbindSpeedLoop() if speedBound then speedBound=false pcall(function() RunService:UnbindFromRenderStep("VD_SpeedEnforcer") end) end end
+local function hookHumanoid(h)
+    if speedConnChanged then speedConnChanged:Disconnect() speedConnChanged=nil end
+    if speedConnAncestry then speedConnAncestry:Disconnect() speedConnAncestry=nil end
+    speedHumanoid = h
+    setWalkSpeed(h, currentSpeed)
+    bindSpeedLoop()
+    speedConnChanged = h:GetPropertyChangedSignal("WalkSpeed"):Connect(function() if h.Parent and h.WalkSpeed ~= currentSpeed then setWalkSpeed(h, currentSpeed) end end)
+    speedConnAncestry = h.AncestryChanged:Connect(function(_, parent) if not parent then unbindSpeedLoop() end end)
+end
+local function onCharacterAdded(char)
+    local h = char:WaitForChild("Humanoid", 10) or char:FindFirstChildOfClass("Humanoid")
+    if h then hookHumanoid(h) end
+    char.ChildAdded:Connect(function(ch) if ch:IsA("Humanoid") then hookHumanoid(ch) end end)
+end
+if LP.Character then onCharacterAdded(LP.Character) end
+LP.CharacterAdded:Connect(onCharacterAdded)
+
+local noclipEnabled = false
+local noclipConn = nil
+local noclipTouched = {}
+
+local function setNoclip(state)
+    if state and not noclipConn then
+        noclipEnabled = true
+        noclipConn = RunService.Stepped:Connect(function()
+            local c = LP.Character
+            if not c then return end
+            for _,part in ipairs(c:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    if part.CanCollide and not noclipTouched[part] then noclipTouched[part] = true end
+                    part.CanCollide = false
+                end
+            end
+        end)
+    elseif not state and noclipConn then
+        noclipEnabled = false
+        noclipConn:Disconnect()
+        noclipConn = nil
+        for part,_ in pairs(noclipTouched) do if part and part.Parent then part.CanCollide = true end end
+        noclipTouched = {}
+    end
+end
+
+TabPlayer:CreateSection("View")
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local camera = workspace.CurrentCamera
+
+local currentFOV = 70
+
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+    camera = workspace.CurrentCamera
+end)
+
+RunService.RenderStepped:Connect(function()
+    if camera then
+        camera.FieldOfView = currentFOV
+    end
+end)
+
+TabPlayer:CreateSlider({
+    Name = "Field of View",
+    Range = {70, 120},
+    Increment = 1,
+    CurrentValue = currentFOV,
+    Flag = "FieldOfView",
+    Callback = function(value)
+        currentFOV = value
+    end
+})
+
+TabPlayer:CreateSection("Movement")
+
+TabPlayer:CreateSlider({
+    Name = "Walk Speed",
+    Range = {0,200},
+    Increment = 1,
+    CurrentValue = 16,
+    Flag = "WalkSpeed",
+    Callback = function(v)
+        currentSpeed = v
+        if speedHumanoid and speedHumanoid.Parent then setWalkSpeed(speedHumanoid, currentSpeed) end
+        bindSpeedLoop()
+    end
+})
+
+TabPlayer:CreateToggle({
+    Name = "Noclip",
+    CurrentValue = false,
+    Flag = "Noclip",
+    Callback = function(s) setNoclip(s) end
+})
+
+LP.CharacterAdded:Connect(function() if noclipEnabled then task.wait(0.2) setNoclip(true) end end)
+
+local antiStunEnabled = false
+local asConnState, asConnPlat, asConnAdded, asTick = nil, nil, nil, nil
+local asParts = {}
+local asHum, asAnimator, asChar = nil, nil, nil
+
+local function asCollectParts()
+    asParts = {}
+    if not asChar then return end
+    for _,v in ipairs(asChar:GetDescendants()) do
+        if v:IsA("BasePart") then asParts[#asParts+1] = v end
+    end
+end
+
+local function asStopStunTracks()
+    if not asAnimator then return end
+    for _,t in ipairs(asAnimator:GetPlayingAnimationTracks()) do
+        local n = string.lower(t.Name or "")
+        if n:find("stun",1,true) or n:find("hit%-stun",1,true) or n:find("wallhitstun",1,true) then
+            pcall(function() t:Stop(0) end)
+        end
+    end
+end
+
+local function asRestoreHumanoid()
+    if not asHum then return end
+    pcall(function() asHum.PlatformStand = false end)
+    pcall(function() asHum.Sit = false end)
+    pcall(function() asHum.AutoRotate = true end)
+    pcall(function() asHum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+    pcall(function() asHum:ChangeState(Enum.HumanoidStateType.Running) end)
+end
+
+local function asUnanchorAll()
+    for i=1,#asParts do
+        local p = asParts[i]
+        if p and p.Parent and p.Anchored then p.Anchored = false end
+    end
+end
+
+local function asPulse()
+    asStopStunTracks()
+    asRestoreHumanoid()
+    asUnanchorAll()
+end
+
+local function asStartGuard()
+    if asTick then asTick:Disconnect() asTick=nil end
+    local t0 = os.clock()
+    asTick = RunService.Heartbeat:Connect(function()
+        if not antiStunEnabled or not asHum or not asChar or os.clock()-t0 > 1.0 then
+            if asTick then asTick:Disconnect() asTick=nil end
+            return
+        end
+        if asHum.PlatformStand or asHum.Sit then asRestoreHumanoid() end
+        asUnanchorAll()
+    end)
+end
+
+local function asOnStateChanged(_, new)
+    if new == Enum.HumanoidStateType.Physics or new == Enum.HumanoidStateType.FallingDown or new == Enum.HumanoidStateType.Ragdoll or new == Enum.HumanoidStateType.GettingUp then
+        asPulse()
+        asStartGuard()
+    end
+end
+
+local function asBindCharacter(c)
+    asChar = c
+    asHum = c:FindFirstChildOfClass("Humanoid") or c:WaitForChild("Humanoid", 10)
+    if not asHum then return end
+    asAnimator = asHum:FindFirstChildOfClass("Animator")
+    asCollectParts()
+    if asConnState then asConnState:Disconnect() end
+    asConnState = asHum.StateChanged:Connect(asOnStateChanged)
+    if asConnPlat then asConnPlat:Disconnect() end
+    asConnPlat = asHum:GetPropertyChangedSignal("PlatformStand"):Connect(function()
+        if not antiStunEnabled then return end
+        if asHum.PlatformStand then
+            asPulse()
+            asStartGuard()
+        end
+    end)
+    if asConnAdded then asConnAdded:Disconnect() end
+    asConnAdded = asChar.DescendantAdded:Connect(function(d)
+        if d:IsA("BasePart") then asParts[#asParts+1] = d end
+    end)
+    asPulse()
+end
+
+local function asEnable()
+    if antiStunEnabled then return end
+    antiStunEnabled = true
+    if LP.Character then asBindCharacter(LP.Character) end
+    LP.CharacterAdded:Connect(function(c) if antiStunEnabled then asBindCharacter(c) end end)
+end
+
+local function asDisable()
+    if not antiStunEnabled then return end
+    antiStunEnabled = false
+    if asConnState then asConnState:Disconnect() asConnState=nil end
+    if asConnPlat then asConnPlat:Disconnect() asConnPlat=nil end
+    if asConnAdded then asConnAdded:Disconnect() asConnAdded=nil end
+    if asTick then asTick:Disconnect() asTick=nil end
+end
+
+local function updateKillerAntiStun()
+    if LP.Team and LP.Team.Name and string.lower(LP.Team.Name) == "killer" then
+        asEnable()
+    else
+        asDisable()
+    end
+    if noFogToggleOn then
+        nfDisable()
+        task.defer(nfEnable)
+    end
+end
+
+LP:GetPropertyChangedSignal("Team"):Connect(updateKillerAntiStun)
+updateKillerAntiStun()
+
+Rayfield:LoadConfiguration()
+Rayfield:Notify({Title="Violence District", Content="Loaded", Duration=6})
+Rayfield:Notify({Title="Info", Content="Anti-Stun active for Killer; No Fog auto-restarts on team change.", Duration=6})
